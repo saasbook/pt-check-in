@@ -1,0 +1,14 @@
+# Local production-like run, or a Docker Compose deployment in Dokploy.
+#   cp .env.example .env   # fill in values
+#   docker compose up --build
+services:
+  web:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      RACK_ENV: production
+      PORT: "8080"
+    restart: unless-stopped

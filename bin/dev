@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Starts the app for local development or a live preview.
+#
+#   PORT=8000 bin/dev
+#
+# Without GOOGLE_CLIENT_ID the app uses a development sign-in form instead of
+# Google, and without an allowlist it lets anyone in (development only).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+bundle check >/dev/null 2>&1 || bundle install
+
+export RACK_ENV="${RACK_ENV:-development}"
+export PORT="${PORT:-8080}"
+exec bundle exec puma -C config/puma.rb

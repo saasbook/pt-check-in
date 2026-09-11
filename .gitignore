@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+/.bundle/
+/vendor/bundle/
+/tmp/
+/log/
+node_modules/
+*.tar.gz

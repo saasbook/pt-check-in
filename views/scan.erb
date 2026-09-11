@@ -1,0 +1,19 @@
+<% @title = "Scan" %>
+<section class="scan">
+  <p class="status-line">Status: <span id="status">Initializing...</span></p>
+  <div id="scanner">
+    <video id="video" autoplay muted playsinline></video>
+    <p>
+      <button id="retry" class="primary" hidden>Retry</button>
+    </p>
+    <p class="hint">A USB barcode scanner works too: scan while this page is open. You can also paste an ID.</p>
+  </div>
+  <div id="result" hidden>
+    <div id="barcode-prefix" class="prefix" hidden></div>
+    <div id="barcode-id"></div>
+    <div id="barcode-source"></div>
+    <div id="student" class="student"></div>
+    <button id="next" class="primary">Next</button>
+  </div>
+</section>
+<script src="/scanner.js" defer></script>
