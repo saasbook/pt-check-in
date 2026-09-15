@@ -166,13 +166,13 @@ class AppTest < Minitest::Test
     assert_equal "not signed in", JSON.parse(last_response.body)["error"]
   end
 
-  def test_lookup_finds_student_and_strips_prefix
+  def test_lookup_finds_student_and_strips_letters
     mock_google(email: "proctor@example.edu")
     sign_in("proctor@example.edu")
     get "/api/lookup", code: "AB 3034567890"
     assert last_response.ok?, last_response.body
     body = JSON.parse(last_response.body)
-    assert_equal "AB", body["prefix"]
+    assert_equal "AB", body["letters"]
     assert_equal "3034567890", body["id"]
     assert body["roster"]["configured"]
     assert_nil body["roster"]["error"]
@@ -187,7 +187,7 @@ class AppTest < Minitest::Test
     assert last_response.ok?
     body = JSON.parse(last_response.body)
     assert_nil body["student"]
-    assert_equal "", body["prefix"]
+    assert_equal "", body["letters"]
   end
 
   def test_lookup_without_roster_configured
@@ -209,6 +209,29 @@ class AppTest < Minitest::Test
     sign_in("proctor@example.edu")
     get "/api/lookup"
     assert_equal 400, last_response.status
+  end
+
+  def test_frame_ancestors_allow_prairietest_and_no_x_frame_options
+    get "/login"
+    assert_nil last_response.headers["X-Frame-Options"]
+    csp = last_response.headers["Content-Security-Policy"].to_s
+    assert_includes csp, "frame-ancestors 'self' https://us.prairietest.com"
+  end
+
+  def test_scan_page_exposes_prairietest_settings
+    mock_google(email: "proctor@example.edu")
+    sign_in("proctor@example.edu")
+    get "/scan"
+    assert_includes last_response.body, 'data-pt-origin="https://us.prairietest.com"'
+    assert_includes last_response.body, 'data-pt-id-field="uin"'
+    assert_includes last_response.body, 'id="manual-id"'
+  end
+
+  def test_prairietest_harness_page_in_test_env
+    get "/test-prairietest"
+    assert last_response.ok?
+    assert_includes last_response.body, 'src="/scan"'
+    assert_includes last_response.body, '"init"'
   end
 
   def test_unknown_page_is_404

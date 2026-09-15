@@ -58,6 +58,15 @@ class App < Sinatra::Base
       logger: Logger.new($stderr)
     )
 
+    # PrairieTest embeds the scan page in an iframe and talks to it with
+    # postMessage (see README, "Message types"). Only messages from this origin
+    # are trusted; "*" disables the check (local testing only).
+    set :prairietest_origin, ENV.fetch("PRAIRIETEST_ORIGIN", "https://us.prairietest.com").strip
+    # Which identifier to report: "uin" sends the scanned number, "uid" sends
+    # the email address found in the roster.
+    set :prairietest_id_field, ENV.fetch("PRAIRIETEST_ID_FIELD", "uin").strip
+    raise "PRAIRIETEST_ID_FIELD must be uin or uid" unless %w[uin uid].include?(settings.prairietest_id_field)
+
     # Live preview support: when the app is embedded in an iframe on another
     # origin (for example a Superconductor preview, which provides
     # AGENT_WEB_HOST), allow framing by that UI and let the session cookie be
@@ -65,7 +74,17 @@ class App < Sinatra::Base
     preview_host = ENV["PREVIEW_HOST"].to_s.strip
     preview_host = ENV["AGENT_WEB_HOST"].to_s.strip if preview_host.empty?
     set :preview_host, preview_host.empty? ? nil : preview_host
-    set :frame_ancestors, ENV.fetch("PREVIEW_FRAME_ANCESTORS", "https://superconductor.com https://*.superconductor.com")
+
+    # Who may put this app in an iframe: PrairieTest, plus the preview UI.
+    ancestors = ["'self'"]
+    ancestors << settings.prairietest_origin if settings.prairietest_origin.match?(%r{\Ahttps?://})
+    ancestors << ENV.fetch("PREVIEW_FRAME_ANCESTORS", "https://superconductor.com https://*.superconductor.com") if settings.preview_host
+    set :frame_ancestors, ancestors.join(" ")
+
+    # The session cookie must be sent when the page is framed by PrairieTest
+    # (a different site), which requires SameSite=None and Secure. Plain local
+    # development over http keeps the stricter defaults.
+    set :cross_site_cookies, production? || !settings.preview_host.nil?
     if settings.preview_host && development?
       # Sinatra only answers to local hostnames in development.
       set :host_authorization, { permitted_hosts: settings.host_authorization[:permitted_hosts] + [settings.preview_host] }
@@ -75,18 +94,17 @@ class App < Sinatra::Base
         key: "pt_check_in.session",
         secret: secret,
         expire_after: 12 * 60 * 60,
-        same_site: settings.preview_host ? :none : :lax,
+        same_site: settings.cross_site_cookies ? :none : :lax,
         httponly: true,
-        secure: production? || !settings.preview_host.nil?,
+        secure: settings.cross_site_cookies,
         coder: Rack::Session::Cookie::Base64::JSON.new
 
     # Sinatra's default protections plus a per-session CSRF token, which is
     # what OmniAuth 2 expects on the POST that starts the login flow.
-    protection = { use: :authenticity_token }
-    if settings.preview_host
-      protection[:except] = [:frame_options] # replaced by a CSP frame-ancestors header below
-      protection[:permitted_origins] = ["https://#{settings.preview_host}"]
-    end
+    # X-Frame-Options would block PrairieTest's iframe; a CSP frame-ancestors
+    # header (set in the before filter) takes its place.
+    protection = { use: :authenticity_token, except: [:frame_options] }
+    protection[:permitted_origins] = ["https://#{settings.preview_host}"] if settings.preview_host
     set :protection, protection
 
     OmniAuth.config.allowed_request_methods = [:post]
@@ -120,9 +138,7 @@ class App < Sinatra::Base
   end
 
   before do
-    if settings.preview_host
-      headers["Content-Security-Policy"] = "frame-ancestors 'self' #{settings.frame_ancestors}"
-    end
+    headers["Content-Security-Policy"] = "frame-ancestors #{settings.frame_ancestors}"
   end
 
   # The app as mounted in config.ru. In preview mode the TLS-terminating proxy
@@ -246,8 +262,8 @@ class App < Sinatra::Base
     erb :scan
   end
 
-  # Looks up a scanned code in the roster. The leading letters of the code are
-  # treated as a prefix and stripped before the lookup.
+  # Looks up a scanned code in the roster. Letters anywhere in the code (for
+  # example the prefix on faculty and staff cards) are stripped first.
   get "/api/lookup" do
     authorize!(json: true)
     content_type :json
@@ -255,16 +271,23 @@ class App < Sinatra::Base
     halt 400, { error: "missing code" }.to_json if code.empty?
     halt 400, { error: "code too long" }.to_json if code.length > 100
 
-    prefix, id = Roster.split_code(code)
+    letters, id = Roster.split_code(code)
     roster = settings.roster
     student = roster.configured? ? roster.lookup(id) : nil
     {
       raw: code,
-      prefix: prefix,
+      letters: letters,
       id: id,
       roster: { configured: roster.configured?, error: roster.error },
       student: student,
     }.to_json
+  end
+
+  # Stand-in for PrairieTest during development: embeds /scan and shows the
+  # messages it sends. Not available in production.
+  get "/test-prairietest" do
+    halt 404 if settings.production?
+    erb :test_prairietest, layout: false
   end
 
   get "/health" do

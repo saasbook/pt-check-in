@@ -35,6 +35,8 @@ All settings are environment variables. `.env.example` lists them; for local dev
 | `ALLOWLIST_TTL_SECONDS` | no | How often the source is re-read. Default `300`. |
 | `ROSTER_SOURCE` | no | URL or file path of a CSV student roster used to show who was scanned. |
 | `ROSTER_TTL_SECONDS` | no | How often the roster is re-read. Default `300`. |
+| `PRAIRIETEST_ORIGIN` | no | Origin PrairieTest runs on; postMessage traffic from anywhere else is ignored. Default `https://us.prairietest.com`. |
+| `PRAIRIETEST_ID_FIELD` | no | `uin` (default) reports the scanned number; `uid` reports the roster email. |
 | `APP_BASE_URL` | no | Public URL of the app, e.g. `https://checkin.example.edu`. Only needed if OAuth redirects are generated with the wrong host or scheme behind a proxy. |
 | `PORT`, `RACK_ENV` | no | Server port (default `8080`) and environment (`production` in Docker). |
 | `PREVIEW_HOST` | no | Hostname of an embedded live preview (see below). Defaults to `AGENT_WEB_HOST` when Superconductor sets it. |
@@ -69,7 +71,18 @@ The first row must be a header. Column names are matched case-insensitively, and
 - The ID column is named **Student ID** or **SID** (so `student_id` and `Student-ID` also work).
 - Displayed columns, when present: **Email** or **Email Address**; **Name** or **Full Name**; **First Name**; **Last Name**. If there is no name column, first and last name are combined.
 
-Other columns are ignored. When a barcode starts with letters (for example a card-type prefix), the letters are stripped before the lookup and shown separately on the result screen. Without a roster the app still shows the scanned ID.
+Other columns are ignored. Letters anywhere in a scanned code (faculty and staff cards prefix the number with letters) are stripped before the lookup and shown separately on the result screen; the same normalization is applied to the roster's ID column. Without a roster the app still shows the scanned ID.
+
+### Sending scans to PrairieTest
+
+PrairieTest does not receive an HTTP POST. Instead it embeds the institution's "read-id" page in an iframe and the two pages talk with `postMessage`, as documented under [Message types](#message-types) below. The scan page implements the read-id side of that protocol:
+
+1. PrairieTest sends `{tag: "init", secret: "..."}`. The scan page stores the secret and replies `{tag: "initialized", secret: "..."}`. The status line switches from "not connected" to "connected".
+2. After each scan, the page strips letters from the code, looks it up in the roster, and sends `{tag: "read-id", secret: "...", uin: "3034567890"}`. With `PRAIRIETEST_ID_FIELD=uid` it sends `{tag: "read-id", secret: "...", uid: "student@example.edu"}` using the roster email instead (PrairieTest ignores `uid` when `uin` is present, so only one is sent). The result screen shows what was sent.
+
+Messages are only accepted from, and sent to, `PRAIRIETEST_ORIGIN`. To use the app with PrairieTest, deploy it over HTTPS, enter `https://<your-domain>/scan` as the read-id page URL in the PrairieTest institution configuration, and sign in once in a normal tab: Google refuses to show its sign-in page inside an iframe, so the framed login page opens Google in a new tab and asks you to reload afterwards.
+
+For local testing, `/test-prairietest` (not available in production) plays the part of PrairieTest: it embeds `/scan`, sends `init`, and logs the `read-id` messages it receives. Set `PRAIRIETEST_ORIGIN` to the app's own origin (for example `http://localhost:8080`) so the harness is trusted.
 
 ### Live preview in Superconductor
 
@@ -79,7 +92,7 @@ The app runs in Superconductor's live preview without any secrets. Configure the
 - **Startup command** (run in background): `cd /workspace/pt-check-in && PORT=8000 bin/dev`
 - **HTTP service:** name `web`, port `8000`, primary. Keep the name `web` so Superconductor exports `AGENT_WEB_HOST`.
 
-When `AGENT_WEB_HOST` (or `PREVIEW_HOST`) is set, the app switches to preview mode: it answers to that hostname, uses it for OAuth redirect URLs, replaces the `X-Frame-Options` header with a `Content-Security-Policy: frame-ancestors` rule allowing `PREVIEW_FRAME_ANCESTORS`, marks the session cookie `SameSite=None; Secure` so sign-in works inside the preview iframe, and accepts form posts from the preview origin. To try Google sign-in or a real allowlist/roster in a preview, add the corresponding variables as exported secrets in the development environment.
+When `AGENT_WEB_HOST` (or `PREVIEW_HOST`) is set, the app switches to preview mode: it answers to that hostname, uses it for OAuth redirect URLs, replaces the `X-Frame-Options` header with a `Content-Security-Policy: frame-ancestors` rule allowing `PREVIEW_FRAME_ANCESTORS`, marks the session cookie `SameSite=None; Secure` so sign-in works inside the preview iframe, and accepts form posts from the preview origin. To try Google sign-in or a real allowlist/roster in a preview, add the corresponding variables as exported secrets in the development environment. To use the `/test-prairietest` harness in a preview, also set `PRAIRIETEST_ORIGIN=https://$AGENT_WEB_HOST` in the startup command.
 
 ## Deploying with Docker
 
@@ -107,16 +120,16 @@ docker compose up --build
 
 - **Camera.** The page uses the browser's built-in [`BarcodeDetector`](https://developer.mozilla.org/docs/Web/API/BarcodeDetector) API when it is available and functional (Chrome on Android, Chrome and Safari on Apple platforms). Otherwise it loads the [ZXing](https://github.com/zxing-js/browser) library, vendored in `public/vendor/`, so no third-party requests are made at runtime. A value must be read twice in a row before it is accepted, which filters occasional misreads of 1D barcodes. Once a barcode is read the camera is stopped; **Next** restarts it.
 - **USB barcode scanner.** Standard HID scanners act as a keyboard. The page listens for keystrokes anywhere on it, so a scan is picked up while the page is open, whether or not the camera is running. Scanners that send an Enter (or Tab) suffix are handled, and a fast burst of characters without a suffix is accepted once it stops.
-- **Paste or type.** Pasting an ID, or typing one and pressing Enter, is accepted too. Only 5-20 letters and digits are accepted, so stray text is ignored with a message in the status line.
+- **Paste or type.** Pasting an ID, typing one anywhere on the page and pressing Enter, or using the "Or type an ID" form is accepted too. Only 5-20 letters and digits with at least 4 digits are accepted, so stray text is ignored with a message in the status line.
 
-The result screen shows the ID in large text, any letter prefix separately, where the code came from, and the roster lookup result.
+The result screen shows the ID number in large text, the letters that were removed, where the code came from, the roster lookup result, and whether it was sent to PrairieTest.
 
 ## Project layout
 
 - `app.rb`, `config.ru`: the Sinatra application and routes.
 - `bin/setup`, `bin/dev`: install dependencies and start the development server.
 - `lib/csv_source.rb`, `lib/allowlist.rb`, `lib/roster.rb`: fetching and caching CSV data, the staff allowlist and the student roster.
-- `views/`, `public/`: templates, stylesheet and the scanner script.
+- `views/`, `public/`: templates, stylesheet and the scanner script (camera, USB scanner, roster lookup, PrairieTest bridge).
 - `test/`: Minitest suite (`bundle exec rake test`).
 - `Dockerfile`, `docker-compose.yml`, `config/puma.rb`: deployment.
 - `read-id.html`, `show-photo.html`, `test-*.html`: reference pages for the PrairieTest Student ID App protocol, described below.

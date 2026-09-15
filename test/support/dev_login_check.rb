@@ -15,6 +15,24 @@ def check(condition, message)
   exit 1
 end
 
+if mode == "production"
+  require_relative "../../app"
+  include Rack::Test::Methods
+  def app = App.rack_app
+  header "Host", "checkin.example.edu"
+  env "HTTPS", "on"
+  get "/test-prairietest"
+  check(last_response.status == 404, "harness page must be hidden in production, got #{last_response.status}")
+  get "/login"
+  check(last_response.ok?, "login page should render in production, got #{last_response.status}")
+  cookie = last_response.headers["Set-Cookie"].to_s.downcase
+  check(cookie.include?("samesite=none") && cookie.include?("secure"), "production cookie must be SameSite=None; Secure for PrairieTest's iframe, got #{cookie.inspect}")
+  check(last_response.headers["X-Frame-Options"].nil?, "no X-Frame-Options in production")
+  check(last_response.headers["Content-Security-Policy"].to_s.include?("https://us.prairietest.com"), "CSP must allow PrairieTest")
+  puts "dev login check (production) passed"
+  exit 0
+end
+
 if mode == "production_boot_fails"
   begin
     require_relative "../../app"
@@ -63,6 +81,8 @@ when "allowlist"
   token = last_response.body[/name="authenticity_token" value="([^"]+)"/, 1]
   post "/auth/developer/callback", authenticity_token: token, name: "Dev", email: "Proctor@Example.edu"
   check(last_response.redirect? && URI(last_response.location).path == "/scan", "allowlisted email should sign in")
+when "harness_hidden_in_production"
+  # Not reachable: production requires Google and an allowlist; see below.
 when "preview"
   check(App.settings.preview_host == "preview.example.com", "preview host should come from AGENT_WEB_HOST")
   check(OmniAuth.config.full_host == "https://preview.example.com", "OmniAuth full_host should use the preview host")

@@ -55,15 +55,18 @@ class Roster
     index.size
   end
 
-  # Splits a scanned code into [letter prefix, remainder], e.g. "AB123" -> ["AB", "123"].
+  # Splits a scanned code into [letters, id]: every alphabetic character and
+  # all whitespace are removed from the ID, e.g. "AB 3034567890" -> ["AB", "3034567890"].
+  # Faculty and staff cards prefix the number with letters; some formats also
+  # append them.
   def self.split_code(code)
-    match = code.to_s.strip.match(/\A([A-Za-z]*)\s*(.*)\z/m)
-    [match[1], match[2].strip]
+    text = code.to_s.strip
+    [text.scan(/[A-Za-z]+/).join, text.gsub(/[A-Za-z\s]+/, "")]
   end
 
-  # Canonical form of an ID for matching: letter prefix and whitespace removed.
+  # Canonical form of an ID for matching: letters and whitespace removed.
   def self.normalize_id(value)
-    split_code(value)[1].gsub(/\s+/, "")
+    split_code(value)[1]
   end
 
   def self.normalize_header(value)

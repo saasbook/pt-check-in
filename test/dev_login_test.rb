@@ -32,6 +32,12 @@ class DevLoginTest < Minitest::Test
     run_check("MODE" => "preview", "AGENT_WEB_HOST" => "preview.example.com")
   end
 
+  def test_production_hides_harness_and_uses_cross_site_cookies
+    run_check("MODE" => "production", "RACK_ENV" => "production",
+              "GOOGLE_CLIENT_ID" => "id", "GOOGLE_CLIENT_SECRET" => "secret",
+              "ALLOWLIST_EMAILS" => "proctor@example.edu")
+  end
+
   def test_production_requires_google_and_allowlist
     run_check("MODE" => "production_boot_fails", "RACK_ENV" => "production")
   end

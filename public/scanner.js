@@ -10,8 +10,10 @@
 //    the code very quickly and usually finishing with Enter.
 // 3. Pasting or typing an ID and pressing Enter.
 //
-// Once a code is accepted, the letter prefix is split off and the remaining ID
-// is looked up in the roster via /api/lookup.
+// Once a code is accepted, all letters are stripped (faculty and staff cards
+// add letters to the number), the remaining ID is looked up in the roster
+// via /api/lookup, and, when embedded in PrairieTest, reported with a
+// "read-id" postMessage.
 
 var ZXING_URL = "/vendor/zxing-browser-0.1.5.min.js";
 
@@ -32,9 +34,11 @@ var REQUIRED_CONSECUTIVE_READS = 2;
 
 // What typed or pasted text is accepted as an ID: letters and digits, 5-20 characters.
 var TYPED_CODE_RE = /^[A-Za-z0-9]{5,20}$/;
+// What must remain after the letters are removed.
+var ID_RE = /^[0-9]{4,20}$/;
 
 // Keystrokes closer together than this come from a scanner, not a person.
-var WEDGE_FAST_GAP_MS = 50;
+var WEDGE_FAST_GAP_MS = 75;
 // A fast burst with no Enter suffix is accepted this long after the last key.
 var WEDGE_SETTLE_MS = 150;
 // Typed characters are forgotten after a pause this long without Enter.
@@ -51,10 +55,64 @@ function setStatus(text, isError) {
     el.classList.toggle("error", !!isError);
 }
 
-// Splits a code into its letter prefix and the remaining ID, e.g. "AB123" -> ["AB", "123"].
+// Splits a code into [letters, id]: every letter and all whitespace are removed
+// from the ID, e.g. "AB 3034567890" -> ["AB", "3034567890"]. Mirrors Roster.split_code.
 function splitCode(code) {
-    var match = String(code).trim().match(/^([A-Za-z]*)\s*([\s\S]*)$/);
-    return [match[1], match[2].trim()];
+    var text = String(code).trim();
+    return [(text.match(/[A-Za-z]+/g) || []).join(""), text.replace(/[A-Za-z\s]+/g, "")];
+}
+
+// --- PrairieTest bridge -----------------------------------------------------
+// PrairieTest embeds this page in an iframe and sends {tag: "init", secret}.
+// We answer {tag: "initialized", secret} and later report each scan with
+// {tag: "read-id", secret, uin} (or uid). See README, "Message types".
+var pt = {
+    origin: null,        // origin we accept messages from ("*" = any, local testing only)
+    idField: "uin",      // "uin": send the scanned number; "uid": send the roster email
+    secret: null,
+    replyOrigin: null,
+    connected: false,
+};
+
+function setPtStatus(text, connected) {
+    var el = document.getElementById("pt-status");
+    el.textContent = text;
+    el.classList.toggle("connected", !!connected);
+}
+
+function onPrairieTestMessage(event) {
+    if (!event.data || event.data.tag !== "init") return;
+    if (pt.origin !== "*" && event.origin !== pt.origin) {
+        console.warn("Ignoring init message from unexpected origin", event.origin);
+        return;
+    }
+    pt.secret = event.data.secret;
+    pt.replyOrigin = pt.origin === "*" ? event.origin : pt.origin;
+    pt.connected = true;
+    event.source.postMessage({tag: "initialized", secret: pt.secret}, pt.replyOrigin);
+    setPtStatus("connected", true);
+}
+
+// Reports a scan to PrairieTest. Returns a message describing what happened.
+function sendToPrairieTest(id, student) {
+    if (!pt.connected) return null;
+    var message = {tag: "read-id", secret: pt.secret};
+    if (pt.idField === "uid") {
+        if (!student || !student.email) return "Not sent to PrairieTest: no email found in the roster for this ID.";
+        message.uid = student.email;
+    } else {
+        if (!id) return "Not sent to PrairieTest: no ID number in the scan.";
+        message.uin = id;
+    }
+    window.parent.postMessage(message, pt.replyOrigin);
+    return "Sent to PrairieTest as " + (message.uin ? "UIN " + message.uin : "UID " + message.uid) + ".";
+}
+
+function showPtSent(text) {
+    var el = document.getElementById("pt-sent");
+    el.hidden = !text;
+    el.textContent = text || "";
+    el.classList.toggle("problem", !!text && text.indexOf("Not sent") === 0);
 }
 
 // Loads the ZXing UMD bundle once and resolves with the ZXingBrowser global.
@@ -126,12 +184,13 @@ function showScanner() {
 
 function showResult(code, sourceLabel) {
     var parts = splitCode(code);
-    var prefix = parts[0], id = parts[1];
-    var prefixEl = document.getElementById("barcode-prefix");
-    prefixEl.textContent = prefix ? "Prefix: " + prefix : "";
-    prefixEl.hidden = !prefix;
+    var letters = parts[0], id = parts[1];
+    var lettersEl = document.getElementById("barcode-letters");
+    lettersEl.textContent = letters ? "Letters removed: " + letters : "";
+    lettersEl.hidden = !letters;
     document.getElementById("barcode-id").textContent = id || code;
     document.getElementById("barcode-source").textContent = sourceLabel;
+    showPtSent(null);
     document.getElementById("scanner").hidden = true;
     document.getElementById("result").hidden = false;
     document.getElementById("next").focus();
@@ -166,6 +225,7 @@ async function lookupStudent(code) {
         var data = await response.json();
         if (sequence != lookupSequence) return; // a newer scan replaced this one
 
+        showPtSent(sendToPrairieTest(data.id, data.student));
         if (data.student) {
             var lines = [];
             if (data.student.name) lines.push(["name", data.student.name]);
@@ -183,6 +243,8 @@ async function lookupStudent(code) {
         if (sequence != lookupSequence) return;
         console.error(err);
         renderStudent([["not-found", "Lookup failed"], ["muted", err.message]]);
+        // The number itself is still known, so PrairieTest can be told in uin mode.
+        showPtSent(sendToPrairieTest(splitCode(code)[1], null));
     }
 }
 
@@ -332,14 +394,31 @@ function resetWedge() {
     wedgeSettleTimer = null;
 }
 
+// True if typed/pasted text looks like an ID once letters are removed.
+function acceptableCode(text) {
+    return TYPED_CODE_RE.test(text) && ID_RE.test(splitCode(text)[1]);
+}
+
 function finishWedge(sourceLabel) {
     var code = wedgeBuffer;
     resetWedge();
-    if (TYPED_CODE_RE.test(code)) {
+    if (acceptableCode(code)) {
         acceptCode(code, sourceLabel);
     } else if (code) {
-        setStatus("Ignored \"" + code + "\": IDs are 5-20 letters and digits.", true);
+        setStatus("Ignored \"" + code + "\": IDs are 5-20 letters and digits with at least 4 digits.", true);
     }
+}
+
+function onManualSubmit(event) {
+    event.preventDefault();
+    var input = document.getElementById("manual-id");
+    var code = input.value.trim();
+    if (!acceptableCode(code)) {
+        setStatus("\"" + code + "\" is not a valid ID: 5-20 letters and digits with at least 4 digits.", true);
+        return;
+    }
+    input.value = "";
+    acceptCode(code, "Typed");
 }
 
 function onKeyDown(event) {
@@ -365,7 +444,7 @@ function onKeyDown(event) {
     clearTimeout(wedgeSettleTimer);
     if (wedgeFast && wedgeBuffer.length >= 5) {
         wedgeSettleTimer = setTimeout(() => {
-            if (wedgeFast && TYPED_CODE_RE.test(wedgeBuffer)) finishWedge("USB scanner");
+            if (wedgeFast && acceptableCode(wedgeBuffer)) finishWedge("USB scanner");
         }, WEDGE_SETTLE_MS);
     }
 }
@@ -373,8 +452,8 @@ function onKeyDown(event) {
 function onPaste(event) {
     if (isTextField(event.target)) return;
     var text = (event.clipboardData || window.clipboardData).getData("text").trim();
-    if (!TYPED_CODE_RE.test(text)) {
-        setStatus("Ignored pasted text: IDs are 5-20 letters and digits.", true);
+    if (!acceptableCode(text)) {
+        setStatus("Ignored pasted text: IDs are 5-20 letters and digits with at least 4 digits.", true);
         return;
     }
     event.preventDefault();
@@ -383,6 +462,13 @@ function onPaste(event) {
 }
 
 ready(() => {
+    var section = document.getElementById("scan");
+    pt.origin = section.dataset.ptOrigin || "*";
+    pt.idField = section.dataset.ptIdField || "uin";
+    window.addEventListener("message", onPrairieTestMessage);
+    setPtStatus(window.parent === window ? "not embedded" : "not connected", false);
+
+    document.getElementById("manual").addEventListener("submit", onManualSubmit);
     document.getElementById("next").addEventListener("click", startScanning);
     document.getElementById("retry").addEventListener("click", startScanning);
     document.addEventListener("keydown", onKeyDown);

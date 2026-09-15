@@ -16,12 +16,14 @@ class RosterTest < Minitest::Test
     (@files || []).each(&:close!)
   end
 
-  def test_split_code
+  def test_split_code_removes_all_letters_and_whitespace
     assert_equal ["AB", "3034567890"], Roster.split_code("AB3034567890")
     assert_equal ["", "3034567890"], Roster.split_code(" 3034567890 ")
-    assert_equal ["X", "12 34"], Roster.split_code("X 12 34")
+    assert_equal ["X", "1234"], Roster.split_code("X 12 34")
+    assert_equal ["ABC", "12345"], Roster.split_code("A12345BC"), "letters after the number are removed too"
     assert_equal ["", ""], Roster.split_code(nil)
     assert_equal ["ABC", ""], Roster.split_code("ABC")
+    assert_equal ["", "12-34"], Roster.split_code("12-34"), "non-letter punctuation is kept"
   end
 
   def test_normalize_header
@@ -52,9 +54,10 @@ class RosterTest < Minitest::Test
     refute only.key?("email")
   end
 
-  def test_lookup_strips_letter_prefix_and_whitespace_on_both_sides
+  def test_lookup_strips_letters_and_whitespace_on_both_sides
     roster = roster_with("sid,name\nC 3034567890,Oski Bear\n")
     assert_equal "Oski Bear", roster.lookup("AB3034567890")["name"]
+    assert_equal "Oski Bear", roster.lookup("3034567890X")["name"]
     assert_equal "Oski Bear", roster.lookup(" 3034567890 ")["name"]
     assert_nil roster.lookup("3034567891")
     assert_nil roster.lookup("")

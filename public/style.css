@@ -156,3 +156,28 @@ main { padding: 1rem; }
   border: 1px solid #bbb;
   border-radius: 8px;
 }
+.pt-line { font-size: 0.9rem; color: var(--muted); }
+.pt-line .connected { color: #1b7f3b; font-weight: 600; }
+.pt-sent { color: #1b7f3b; font-weight: 600; margin-bottom: 1.5rem; }
+.pt-sent.problem { color: var(--error); }
+.manual {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: center;
+  margin: 1rem 0 0.5rem;
+}
+.manual label { color: var(--muted); }
+.manual input {
+  flex: 1 1 12rem;
+  font-size: 1.1rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #bbb;
+  border-radius: 8px;
+}
+.primary.small { font-size: 1.1rem; padding: 0.55rem 1.2rem; }
+.letters {
+  color: var(--muted);
+  font-size: 1.25rem;
+}
