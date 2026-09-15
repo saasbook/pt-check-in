@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+!.env.example
+.bundle
+vendor/bundle
+tmp
+log
+test
+node_modules
+*.tar.gz
+images
+read-id.html
+show-photo.html
+test-read-id.html
+test-show-photo.html
+Makefile

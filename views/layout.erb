@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title><%= page_title(@title) %></title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">PrairieTest Check-in</a>
+      <% if logged_in? %>
+        <div class="user">
+          <span class="user-email"><%= current_user["email"] %></span>
+          <form method="post" action="/logout">
+            <input type="hidden" name="authenticity_token" value="<%= csrf_token %>">
+            <button type="submit" class="link-button">Sign out</button>
+          </form>
+        </div>
+      <% end %>
+    </header>
+    <main>
+      <%== yield %>
+    </main>
+  </body>
+</html>

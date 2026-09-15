@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# One-time setup for local development.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+bundle install
+if [ ! -f .env ]; then
+  cp .env.example .env
+  echo "Created .env from .env.example; fill in values as needed."
+fi

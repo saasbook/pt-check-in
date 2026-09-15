@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>PrairieTest harness - PrairieTest Check-in</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+      main { max-width: 60rem; margin: 0 auto; }
+      iframe { width: 100%; height: 70vh; border: 2px dashed #1a73e8; border-radius: 8px; background: #fff; }
+      #log { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.9rem; white-space: pre-wrap; background: #fff; padding: 0.75rem; border-radius: 8px; min-height: 4rem; }
+    </style>
+  </head>
+  <body>
+    <header class="topbar"><span class="brand">PrairieTest harness (development only)</span></header>
+    <main>
+      <p>This page pretends to be PrairieTest: it embeds <code>/scan</code>, sends the <code>init</code> message, and logs what the scan page sends back. Sign in first in another tab if the frame shows the login page.</p>
+      <p class="status-line">Harness status: <span id="status">Loading</span></p>
+      <div id="log"></div>
+      <p><iframe id="frame" src="/scan" allow="camera"></iframe></p>
+    </main>
+    <script>
+      // Same protocol as test-read-id.html in the repository root.
+      var secret = "68dca265-45be-4cce-a31f-aa8a6eafedb5";
+      var initialized = false;
+      var frame = document.getElementById("frame");
+      function setStatus(text) { document.getElementById("status").textContent = text; }
+      function log(text) {
+          var el = document.getElementById("log");
+          el.textContent += new Date().toLocaleTimeString() + "  " + text + "\n";
+      }
+      function sendInit() {
+          if (initialized) return;
+          frame.contentWindow.postMessage({tag: "init", secret: secret}, window.location.origin);
+          setTimeout(sendInit, 500);
+      }
+      window.addEventListener("message", (event) => {
+          if (event.origin !== window.location.origin || !event.data) return;
+          if (event.data.secret !== secret) {
+              log("ERROR: wrong secret in " + JSON.stringify(event.data));
+              return;
+          }
+          if (event.data.tag == "initialized") {
+              initialized = true;
+              setStatus("Scan page initialized; waiting for read-id messages");
+              log("<- initialized");
+          } else if (event.data.tag == "read-id") {
+              var id = event.data.uin ? "UIN " + event.data.uin : "UID " + event.data.uid;
+              setStatus("Received " + id);
+              log("<- read-id " + JSON.stringify(event.data));
+          } else {
+              log("<- " + JSON.stringify(event.data));
+          }
+      });
+      frame.addEventListener("load", () => { setStatus("Sending init"); sendInit(); });
+    </script>
+  </body>
+</html>

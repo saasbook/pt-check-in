@@ -1,0 +1,32 @@
+<% @title = "Sign in" %>
+<section class="card center">
+  <h1>Staff sign in</h1>
+  <% if error %>
+    <p class="error"><%= error %></p>
+  <% end %>
+  <% if settings.dev_login %>
+    <p class="notice">Development mode: Google sign-in is not configured, so enter any email address<%= settings.allow_anyone ? "" : " on the allowlist" %>.</p>
+    <form method="post" action="/auth/developer/callback" class="stack">
+      <input type="hidden" name="authenticity_token" value="<%= csrf_token %>">
+      <input type="hidden" name="name" value="Developer">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" required autofocus placeholder="you@example.edu">
+      <button type="submit" class="primary">Sign in (development)</button>
+    </form>
+  <% else %>
+    <p>Sign in with your Google account to check students in. Only staff on the allowed list can use this app.</p>
+    <p id="framed-note" class="notice" hidden>This page is embedded in another site. Google sign-in opens in a new tab; once you are signed in, reload this page.</p>
+    <form method="post" action="/auth/google" id="google-form">
+      <input type="hidden" name="authenticity_token" value="<%= csrf_token %>">
+      <button type="submit" class="primary">Sign in with Google</button>
+    </form>
+    <script>
+      // Google refuses to show its sign-in page inside an iframe (for example
+      // when PrairieTest embeds this app), so open it in a new tab instead.
+      if (window.top !== window.self) {
+          document.getElementById("google-form").target = "_blank";
+          document.getElementById("framed-note").hidden = false;
+      }
+    </script>
+  <% end %>
+</section>
